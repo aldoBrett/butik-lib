@@ -1,13 +1,23 @@
 package butik_repository
 
 import (
+	"butik-lib/butik_domain"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+// A couple of syntactically valid UUIDs that gen_random_uuid() will never
+// produce collisions with in a freshly truncated table.
+const (
+	missingProductID = "00000000-0000-0000-0000-0000000000ff"
+	newProductID     = "11111111-1111-1111-1111-111111111111"
 )
 
 // newTestPool connects to the database pointed at by DATABASE_URL and makes sure
@@ -218,6 +228,161 @@ func TestProductsRepository(t *testing.T) {
 		if products[0].ID != ids[1] || products[1].ID != ids[2] {
 			t.Fatalf("GetProducts limit=2 offset=1 = [%s %s], want [%s %s]",
 				products[0].ID, products[1].ID, ids[1], ids[2])
+		}
+	})
+
+	t.Run("GetProductByID maps columns for an existing product", func(t *testing.T) {
+		ctx, pool := newTestPool(t)
+		repo := NewProductsRepositoryHandler(ctx, pool, nil)
+
+		base := time.Now().UTC().Truncate(time.Second)
+		id := seedProduct(t, ctx, pool, "Shirt", "shirt", "a nice shirt", base)
+
+		got, err := repo.GetProductByID(id)
+		if err != nil {
+			t.Fatalf("GetProductByID: %v", err)
+		}
+		if got.ID != id || got.Name != "Shirt" || got.Slug != "shirt" || got.Description != "a nice shirt" {
+			t.Fatalf("GetProductByID mapped incorrectly: %+v", got)
+		}
+		if !got.CreatedAt.Equal(base) || !got.UpdatedAt.Equal(base) {
+			t.Fatalf("GetProductByID timestamps = (%s, %s), want %s", got.CreatedAt, got.UpdatedAt, base)
+		}
+	})
+
+	t.Run("GetProductByID returns pgx.ErrNoRows when the id is unknown", func(t *testing.T) {
+		ctx, pool := newTestPool(t)
+		repo := NewProductsRepositoryHandler(ctx, pool, nil)
+
+		seedProduct(t, ctx, pool, "Other", "other", "unrelated", time.Now().UTC())
+
+		got, err := repo.GetProductByID(missingProductID)
+		if err == nil {
+			t.Fatalf("GetProductByID(unknown) = %+v, want an error", got)
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			t.Fatalf("GetProductByID(unknown) error = %v, want pgx.ErrNoRows", err)
+		}
+		if got != nil {
+			t.Fatalf("GetProductByID(unknown) returned non-nil product %+v", got)
+		}
+	})
+
+	t.Run("DeleteProductByID removes only the target row", func(t *testing.T) {
+		ctx, pool := newTestPool(t)
+		repo := NewProductsRepositoryHandler(ctx, pool, nil)
+
+		now := time.Now().UTC()
+		keepID := seedProduct(t, ctx, pool, "Keep", "keep", "stays", now)
+		dropID := seedProduct(t, ctx, pool, "Drop", "drop", "goes", now)
+
+		if err := repo.DeleteProductByID(dropID); err != nil {
+			t.Fatalf("DeleteProductByID: %v", err)
+		}
+
+		if _, err := repo.GetProductByID(dropID); !errors.Is(err, pgx.ErrNoRows) {
+			t.Fatalf("after delete, GetProductByID(dropID) error = %v, want pgx.ErrNoRows", err)
+		}
+		if _, err := repo.GetProductByID(keepID); err != nil {
+			t.Fatalf("DeleteProductByID removed the wrong row: %v", err)
+		}
+
+		count, err := repo.CountProducts()
+		if err != nil {
+			t.Fatalf("CountProducts: %v", err)
+		}
+		if count != 1 {
+			t.Fatalf("CountProducts after delete = %d, want 1", count)
+		}
+	})
+
+	t.Run("DeleteProductByID is a no-op for an unknown id", func(t *testing.T) {
+		ctx, pool := newTestPool(t)
+		repo := NewProductsRepositoryHandler(ctx, pool, nil)
+
+		seedProduct(t, ctx, pool, "Keep", "keep", "stays", time.Now().UTC())
+
+		if err := repo.DeleteProductByID(missingProductID); err != nil {
+			t.Fatalf("DeleteProductByID(unknown) = %v, want nil", err)
+		}
+
+		count, err := repo.CountProducts()
+		if err != nil {
+			t.Fatalf("CountProducts: %v", err)
+		}
+		if count != 1 {
+			t.Fatalf("CountProducts after no-op delete = %d, want 1", count)
+		}
+	})
+
+	t.Run("SaveProduct inserts when the id is new", func(t *testing.T) {
+		ctx, pool := newTestPool(t)
+		repo := NewProductsRepositoryHandler(ctx, pool, nil)
+
+		created := time.Now().UTC().Truncate(time.Second)
+		p := &butik_domain.Product{
+			ID:          newProductID,
+			Name:        "Hat",
+			Slug:        "hat",
+			Description: "a hat",
+			CreatedAt:   created,
+			UpdatedAt:   created,
+		}
+
+		if err := repo.SaveProduct(p); err != nil {
+			t.Fatalf("SaveProduct insert: %v", err)
+		}
+
+		got, err := repo.GetProductByID(newProductID)
+		if err != nil {
+			t.Fatalf("GetProductByID after insert: %v", err)
+		}
+		if got.Name != "Hat" || got.Slug != "hat" || got.Description != "a hat" {
+			t.Fatalf("SaveProduct stored the wrong values: %+v", got)
+		}
+		if !got.CreatedAt.Equal(created) || !got.UpdatedAt.Equal(created) {
+			t.Fatalf("SaveProduct timestamps = (%s, %s), want %s", got.CreatedAt, got.UpdatedAt, created)
+		}
+	})
+
+	t.Run("SaveProduct updates in place when the id already exists", func(t *testing.T) {
+		ctx, pool := newTestPool(t)
+		repo := NewProductsRepositoryHandler(ctx, pool, nil)
+
+		created := time.Now().UTC().Truncate(time.Second)
+		id := seedProduct(t, ctx, pool, "Old name", "old-slug", "old description", created)
+
+		updated := created.Add(time.Hour)
+		p := &butik_domain.Product{
+			ID:          id,
+			Name:        "New name",
+			Slug:        "new-slug",
+			Description: "new description",
+			CreatedAt:   created,
+			UpdatedAt:   updated,
+		}
+
+		if err := repo.SaveProduct(p); err != nil {
+			t.Fatalf("SaveProduct update: %v", err)
+		}
+
+		got, err := repo.GetProductByID(id)
+		if err != nil {
+			t.Fatalf("GetProductByID after update: %v", err)
+		}
+		if got.Name != "New name" || got.Slug != "new-slug" || got.Description != "new description" {
+			t.Fatalf("SaveProduct did not update the values: %+v", got)
+		}
+		if !got.UpdatedAt.Equal(updated) {
+			t.Fatalf("SaveProduct updated_at = %s, want %s", got.UpdatedAt, updated)
+		}
+
+		count, err := repo.CountProducts()
+		if err != nil {
+			t.Fatalf("CountProducts: %v", err)
+		}
+		if count != 1 {
+			t.Fatalf("SaveProduct upsert created a second row: count = %d, want 1", count)
 		}
 	})
 }

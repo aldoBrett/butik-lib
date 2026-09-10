@@ -22,6 +22,9 @@ const (
 type ProductsRepository interface {
 	GetProducts(params *GetProductsParams) ([]*butik_domain.Product, error)
 	CountProducts() (int, error)
+	GetProductByID(id string) (*butik_domain.Product, error)
+	DeleteProductByID(id string) error
+	SaveProduct(product *butik_domain.Product) error
 }
 
 type ProductsRepositoryHandler struct {
@@ -76,6 +79,28 @@ func (h *ProductsRepositoryHandler) GetProducts(params *GetProductsParams) ([]*b
 	return products, nil
 }
 
+func (h *ProductsRepositoryHandler) GetProductByID(id string) (*butik_domain.Product, error) {
+	const query = `
+		SELECT id, name, slug, description, created_at, updated_at
+		FROM butiks_engine.products
+		WHERE id = $1
+	`
+
+	var p butik_domain.Product
+	if err := h.pool.QueryRow(h.ctx, query, id).Scan(
+		&p.ID,
+		&p.Name,
+		&p.Slug,
+		&p.Description,
+		&p.CreatedAt,
+		&p.UpdatedAt,
+	); err != nil {
+		return nil, fmt.Errorf("querying product by id: %w", err)
+	}
+
+	return &p, nil
+}
+
 func (h *ProductsRepositoryHandler) CountProducts() (int, error) {
 	const query = `SELECT COUNT(*) FROM butiks_engine.products`
 
@@ -85,6 +110,49 @@ func (h *ProductsRepositoryHandler) CountProducts() (int, error) {
 	}
 
 	return count, nil
+}
+
+func (h *ProductsRepositoryHandler) DeleteProductByID(id string) error {
+	const query = `
+		DELETE FROM butiks_engine.products
+		WHERE id = $1
+	`
+
+	_, err := h.pool.Exec(h.ctx, query, id)
+	if err != nil {
+		return fmt.Errorf("deleting product by id: %w", err)
+	}
+
+	return nil
+}
+
+// This method should upsert the product, inserting it if it doesn't exist or updating it if it does.
+func (h *ProductsRepositoryHandler) SaveProduct(product *butik_domain.Product) error {
+	const query = `
+		INSERT INTO butiks_engine.products (id, name, slug, description, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		ON CONFLICT (id) DO UPDATE SET
+			name = EXCLUDED.name,
+			slug = EXCLUDED.slug,
+			description = EXCLUDED.description,
+			created_at = EXCLUDED.created_at,
+			updated_at = EXCLUDED.updated_at
+	`
+
+	_, err := h.pool.Exec(
+		h.ctx,
+		query,
+		product.ID,
+		product.Name,
+		product.Slug,
+		product.Description,
+		product.CreatedAt,
+		product.UpdatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("saving product: %w", err)
+	}
+	return nil
 }
 
 // resolveProductsPagination applies sane defaults and bounds to the optional
