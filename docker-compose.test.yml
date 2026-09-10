@@ -1,0 +1,36 @@
+version: "3.8"
+services:
+  db:
+    # image: postgres:16-alpine
+    image: postgis/postgis:16-3.4-alpine
+    container_name: butik_test_db
+    environment:
+      POSTGRES_DB: butik_test_db
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: secretpassword
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d tqt_test_db"]
+      interval: 5s
+      timeout: 5s
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    container_name: butik_test_app
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://admin:secretpassword@db:5432/butik_test_db
+      # This database is of the flowy-admin-api project
+      # DATABASE_URL: postgres://admin:secretpassword@host.docker.internal:5432/flowy_main_test_db?sslmode=disable
+      TEST_ENV: true
+    volumes:
+      - .:/app
+
+volumes:
+  pgdata:
