@@ -22,6 +22,8 @@ const (
 
 type ProductVariantsRepository interface {
 	SaveProductVariant(variant *butik_domain.ProductVariant) error
+	DeleteProductVariantByID(id string) error
+	DeleteProductVariantsByProductID(productID string) error
 	GetProductVariants(params *GetProductVariantsParams) ([]*butik_domain.ProductVariant, error)
 	CountProductVariants(params *GetProductVariantsParams) (int, error)
 }
@@ -38,6 +40,24 @@ func NewProductVariantsRepositoryHandler(ctx context.Context, pool *pgxpool.Pool
 		pool: pool,
 		user: user,
 	}
+}
+
+func (h *ProductVariantsRepositoryHandler) DeleteProductVariantByID(id string) error {
+	query := `DELETE FROM butiks_engine.product_variants WHERE id = $1`
+	_, err := h.pool.Exec(h.ctx, query, id)
+	if err != nil {
+		return fmt.Errorf("deleting product variant by id: %w", err)
+	}
+	return nil
+}
+
+func (h *ProductVariantsRepositoryHandler) DeleteProductVariantsByProductID(productID string) error {
+	query := `DELETE FROM butiks_engine.product_variants WHERE product_id = $1`
+	_, err := h.pool.Exec(h.ctx, query, productID)
+	if err != nil {
+		return fmt.Errorf("deleting product variants by product id: %w", err)
+	}
+	return nil
 }
 
 func (h *ProductVariantsRepositoryHandler) SaveProductVariant(variant *butik_domain.ProductVariant) error {

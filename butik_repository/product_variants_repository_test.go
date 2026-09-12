@@ -220,6 +220,95 @@ func TestProductVariantsRepository(t *testing.T) {
 		}
 	})
 
+	t.Run("DeleteProductVariantByID removes only the target row", func(t *testing.T) {
+		ctx, pool := newProductVariantsTestPool(t)
+		repo := NewProductVariantsRepositoryHandler(ctx, pool, nil)
+
+		now := time.Now().UTC()
+		productID := seedProduct(t, ctx, pool, "Product", "product", "p", now)
+		keepID := seedProductVariant(t, ctx, pool, productID, "KEEP", 10.00, now)
+		dropID := seedProductVariant(t, ctx, pool, productID, "DROP", 20.00, now.Add(time.Minute))
+
+		if err := repo.DeleteProductVariantByID(dropID); err != nil {
+			t.Fatalf("DeleteProductVariantByID: %v", err)
+		}
+
+		variants, err := repo.GetProductVariants(nil)
+		if err != nil {
+			t.Fatalf("GetProductVariants after delete: %v", err)
+		}
+		if len(variants) != 1 || variants[0].ID != keepID {
+			t.Fatalf("DeleteProductVariantByID left %+v, want only %s", variants, keepID)
+		}
+	})
+
+	t.Run("DeleteProductVariantByID is a no-op for an unknown id", func(t *testing.T) {
+		ctx, pool := newProductVariantsTestPool(t)
+		repo := NewProductVariantsRepositoryHandler(ctx, pool, nil)
+
+		now := time.Now().UTC()
+		productID := seedProduct(t, ctx, pool, "Product", "product", "p", now)
+		seedProductVariant(t, ctx, pool, productID, "KEEP", 10.00, now)
+
+		if err := repo.DeleteProductVariantByID(missingProductID); err != nil {
+			t.Fatalf("DeleteProductVariantByID(unknown) = %v, want nil", err)
+		}
+
+		count, err := repo.CountProductVariants(nil)
+		if err != nil {
+			t.Fatalf("CountProductVariants: %v", err)
+		}
+		if count != 1 {
+			t.Fatalf("CountProductVariants after no-op delete = %d, want 1", count)
+		}
+	})
+
+	t.Run("DeleteProductVariantsByProductID removes all variants of a product", func(t *testing.T) {
+		ctx, pool := newProductVariantsTestPool(t)
+		repo := NewProductVariantsRepositoryHandler(ctx, pool, nil)
+
+		now := time.Now().UTC()
+		productA := seedProduct(t, ctx, pool, "Product A", "product-a", "a", now)
+		productB := seedProduct(t, ctx, pool, "Product B", "product-b", "b", now)
+
+		seedProductVariant(t, ctx, pool, productA, "A-1", 10.00, now)
+		seedProductVariant(t, ctx, pool, productA, "A-2", 20.00, now.Add(time.Minute))
+		keepID := seedProductVariant(t, ctx, pool, productB, "B-1", 30.00, now.Add(2*time.Minute))
+
+		if err := repo.DeleteProductVariantsByProductID(productA); err != nil {
+			t.Fatalf("DeleteProductVariantsByProductID: %v", err)
+		}
+
+		variants, err := repo.GetProductVariants(nil)
+		if err != nil {
+			t.Fatalf("GetProductVariants after delete: %v", err)
+		}
+		if len(variants) != 1 || variants[0].ID != keepID {
+			t.Fatalf("DeleteProductVariantsByProductID left %+v, want only %s", variants, keepID)
+		}
+	})
+
+	t.Run("DeleteProductVariantsByProductID is a no-op for an unknown product id", func(t *testing.T) {
+		ctx, pool := newProductVariantsTestPool(t)
+		repo := NewProductVariantsRepositoryHandler(ctx, pool, nil)
+
+		now := time.Now().UTC()
+		productID := seedProduct(t, ctx, pool, "Product", "product", "p", now)
+		seedProductVariant(t, ctx, pool, productID, "KEEP", 10.00, now)
+
+		if err := repo.DeleteProductVariantsByProductID(missingProductID); err != nil {
+			t.Fatalf("DeleteProductVariantsByProductID(unknown) = %v, want nil", err)
+		}
+
+		count, err := repo.CountProductVariants(nil)
+		if err != nil {
+			t.Fatalf("CountProductVariants: %v", err)
+		}
+		if count != 1 {
+			t.Fatalf("CountProductVariants after no-op delete = %d, want 1", count)
+		}
+	})
+
 	t.Run("GetProductVariants respects limit and offset", func(t *testing.T) {
 		ctx, pool := newProductVariantsTestPool(t)
 		repo := NewProductVariantsRepositoryHandler(ctx, pool, nil)
