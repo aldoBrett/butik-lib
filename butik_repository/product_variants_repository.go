@@ -21,6 +21,7 @@ const (
 )
 
 type ProductVariantsRepository interface {
+	SaveProductVariant(variant *butik_domain.ProductVariant) error
 	GetProductVariants(params *GetProductVariantsParams) ([]*butik_domain.ProductVariant, error)
 	CountProductVariants(params *GetProductVariantsParams) (int, error)
 }
@@ -37,6 +38,32 @@ func NewProductVariantsRepositoryHandler(ctx context.Context, pool *pgxpool.Pool
 		pool: pool,
 		user: user,
 	}
+}
+
+func (h *ProductVariantsRepositoryHandler) SaveProductVariant(variant *butik_domain.ProductVariant) error {
+	query := `
+		INSERT INTO butiks_engine.product_variants (id, product_id, sku, price, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		ON CONFLICT (id) DO UPDATE
+		SET product_id = EXCLUDED.product_id,
+		    sku = EXCLUDED.sku,
+		    price = EXCLUDED.price,
+		    created_at = EXCLUDED.created_at,
+		    updated_at = EXCLUDED.updated_at
+	`
+
+	_, err := h.pool.Exec(h.ctx, query,
+		variant.ID,
+		variant.ProductID,
+		variant.SKU,
+		variant.Price,
+		variant.CreatedAt,
+		variant.UpdatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("saving product variant: %w", err)
+	}
+	return nil
 }
 
 func (h *ProductVariantsRepositoryHandler) GetProductVariants(params *GetProductVariantsParams) ([]*butik_domain.ProductVariant, error) {
