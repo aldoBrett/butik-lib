@@ -52,9 +52,9 @@ type Order struct {
 }
 
 type OrderItem struct {
-	ID               string    `json:"id"`
-	OrderID          string    `json:"order_id"`
-	ProductVariantID string    `json:"product_variant_id"`
+	ID               string `json:"id"`
+	OrderID          string `json:"order_id"`
+	ProductVariantID string `json:"product_variant_id"`
 	// LocationID identifies which inventory location fulfills this line
 	// item, since a product variant can have separate inventory rows per
 	// location.
@@ -63,4 +63,9 @@ type OrderItem struct {
 	UnitPrice  float64   `json:"unit_price"`
 	CreatedAt  time.Time `json:"created_at"`
 	UpdatedAt  time.Time `json:"updated_at"`
+}
+
+type OrderWithOrderItems struct {
+	Order      Order       `json:"order"`
+	OrderItems []OrderItem `json:"order_items"`
 }

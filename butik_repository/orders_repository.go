@@ -26,8 +26,9 @@ type CreateOrderParams struct {
 }
 
 type GetOrdersParams struct {
-	Offset *int
-	Limit  *int
+	Offset            *int
+	Limit             *int
+	IncludeOrderItems *bool
 }
 
 const (
@@ -37,7 +38,7 @@ const (
 
 type OrdersRepository interface {
 	CreateOrder(params CreateOrderParams) error
-	GetOrders(params *GetOrdersParams) ([]*butik_domain.Order, error)
+	GetOrders(params *GetOrdersParams) ([]*butik_domain.OrderWithOrderItems, error)
 	CountOrders() (int, error)
 	GetOrderByID(id string) (*butik_domain.Order, error)
 	DeleteOrderByID(id string) error
@@ -157,9 +158,20 @@ func (h *OrdersRepositoryHandler) CreateOrder(params CreateOrderParams) error {
 	return nil
 }
 
-func (h *OrdersRepositoryHandler) GetOrders(params *GetOrdersParams) ([]*butik_domain.Order, error) {
+// GetOrders lists orders, optionally joined with their order items so a
+// detail view can display them without extra lookups.
+func (h *OrdersRepositoryHandler) GetOrders(params *GetOrdersParams) ([]*butik_domain.OrderWithOrderItems, error) {
 	limit, offset := resolveOrdersPagination(params)
 
+	includeOrderItems := params != nil && params.IncludeOrderItems != nil && *params.IncludeOrderItems
+
+	if includeOrderItems {
+		return h.getOrdersWithItems(limit, offset)
+	}
+	return h.getOrdersWithoutItems(limit, offset)
+}
+
+func (h *OrdersRepositoryHandler) getOrdersWithoutItems(limit, offset int) ([]*butik_domain.OrderWithOrderItems, error) {
 	const query = `
 		SELECT id, total_amount, total_price, created_at, updated_at
 		FROM butiks_engine.orders
@@ -173,7 +185,7 @@ func (h *OrdersRepositoryHandler) GetOrders(params *GetOrdersParams) ([]*butik_d
 	}
 	defer rows.Close()
 
-	orders := make([]*butik_domain.Order, 0)
+	orders := make([]*butik_domain.OrderWithOrderItems, 0)
 	for rows.Next() {
 		var o butik_domain.Order
 		if err := rows.Scan(
@@ -185,10 +197,69 @@ func (h *OrdersRepositoryHandler) GetOrders(params *GetOrdersParams) ([]*butik_d
 		); err != nil {
 			return nil, fmt.Errorf("scanning order: %w", err)
 		}
-		orders = append(orders, &o)
+		orders = append(orders, &butik_domain.OrderWithOrderItems{Order: o})
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterating orders: %w", err)
+	}
+
+	return orders, nil
+}
+
+// getOrdersWithItems fetches the paginated page of orders and then, in a
+// second query keyed by the page's order ids, all of their order items.
+// A join on order_items would duplicate the order columns once per item, so
+// two queries plus an in-memory merge is simpler than de-duplicating join
+// rows while still avoiding one query per order (N+1).
+func (h *OrdersRepositoryHandler) getOrdersWithItems(limit, offset int) ([]*butik_domain.OrderWithOrderItems, error) {
+	orders, err := h.getOrdersWithoutItems(limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	if len(orders) == 0 {
+		return orders, nil
+	}
+
+	orderIDs := make([]string, len(orders))
+	byOrderID := make(map[string]*butik_domain.OrderWithOrderItems, len(orders))
+	for i, o := range orders {
+		orderIDs[i] = o.Order.ID
+		byOrderID[o.Order.ID] = o
+	}
+
+	const itemsQuery = `
+		SELECT id, order_id, product_variant_id, location_id, quantity, unit_price, created_at, updated_at
+		FROM butiks_engine.order_items
+		WHERE order_id = ANY($1)
+		ORDER BY created_at ASC, id ASC
+	`
+
+	rows, err := h.pool.Query(h.ctx, itemsQuery, orderIDs)
+	if err != nil {
+		return nil, fmt.Errorf("querying order items: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var it butik_domain.OrderItem
+		if err := rows.Scan(
+			&it.ID,
+			&it.OrderID,
+			&it.ProductVariantID,
+			&it.LocationID,
+			&it.Quantity,
+			&it.UnitPrice,
+			&it.CreatedAt,
+			&it.UpdatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scanning order item: %w", err)
+		}
+		if o, ok := byOrderID[it.OrderID]; ok {
+			o.OrderItems = append(o.OrderItems, it)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating order items: %w", err)
 	}
 
 	return orders, nil

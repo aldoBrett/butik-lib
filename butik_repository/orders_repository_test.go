@@ -237,17 +237,20 @@ func TestOrdersRepository(t *testing.T) {
 
 		wantOrder := []string{newID, midID, oldID}
 		for i, want := range wantOrder {
-			if orders[i].ID != want {
-				t.Fatalf("orders[%d].ID = %s, want %s (order should be created_at desc)", i, orders[i].ID, want)
+			if orders[i].Order.ID != want {
+				t.Fatalf("orders[%d].Order.ID = %s, want %s (order should be created_at desc)", i, orders[i].Order.ID, want)
 			}
 		}
 
-		first := orders[0]
+		first := orders[0].Order
 		if first.TotalAmount != 30 || first.TotalPrice != 30 {
 			t.Fatalf("first order mapped incorrectly: %+v", first)
 		}
 		if first.CreatedAt.IsZero() || first.UpdatedAt.IsZero() {
 			t.Fatalf("timestamps not populated: %+v", first)
+		}
+		if len(orders[0].OrderItems) != 0 {
+			t.Fatalf("GetOrders without IncludeOrderItems returned %d items, want 0", len(orders[0].OrderItems))
 		}
 	})
 
@@ -272,9 +275,63 @@ func TestOrdersRepository(t *testing.T) {
 		if len(orders) != 2 {
 			t.Fatalf("GetOrders returned %d orders, want 2", len(orders))
 		}
-		if orders[0].ID != ids[1] || orders[1].ID != ids[2] {
+		if orders[0].Order.ID != ids[1] || orders[1].Order.ID != ids[2] {
 			t.Fatalf("GetOrders limit=2 offset=1 = [%s %s], want [%s %s]",
-				orders[0].ID, orders[1].ID, ids[1], ids[2])
+				orders[0].Order.ID, orders[1].Order.ID, ids[1], ids[2])
+		}
+	})
+
+	t.Run("GetOrders with IncludeOrderItems populates each order's items", func(t *testing.T) {
+		ctx, pool := newOrdersTestPool(t)
+		repo := NewOrdersRepositoryHandler(ctx, pool, nil)
+
+		variantA, locationA, _ := seedOrderFixtures(t, ctx, pool, "a", 10)
+		variantB, locationB, _ := seedOrderFixtures(t, ctx, pool, "b", 10)
+
+		now := time.Now().UTC().Truncate(time.Second)
+		orderWithItems := &butik_domain.Order{ID: newOrderID, TotalAmount: 19.98, TotalPrice: 19.98, CreatedAt: now, UpdatedAt: now}
+		items := []*butik_domain.OrderItem{
+			{ID: newOrderItemID, ProductVariantID: variantA, LocationID: locationA, Quantity: 1, UnitPrice: 9.99, CreatedAt: now, UpdatedAt: now},
+			{ID: newOrderItemID2, ProductVariantID: variantB, LocationID: locationB, Quantity: 1, UnitPrice: 9.99, CreatedAt: now, UpdatedAt: now},
+		}
+		if err := repo.CreateOrder(CreateOrderParams{Order: orderWithItems, OrderItems: items}); err != nil {
+			t.Fatalf("CreateOrder: %v", err)
+		}
+
+		emptyOrderID := seedOrder(t, ctx, pool, 5, 5, now.Add(-time.Minute))
+
+		include := true
+		orders, err := repo.GetOrders(&GetOrdersParams{IncludeOrderItems: &include})
+		if err != nil {
+			t.Fatalf("GetOrders with IncludeOrderItems: %v", err)
+		}
+		if len(orders) != 2 {
+			t.Fatalf("GetOrders returned %d orders, want 2", len(orders))
+		}
+
+		byID := make(map[string]*butik_domain.OrderWithOrderItems, len(orders))
+		for _, o := range orders {
+			byID[o.Order.ID] = o
+		}
+
+		withItems, ok := byID[newOrderID]
+		if !ok {
+			t.Fatalf("GetOrders result missing order %s", newOrderID)
+		}
+		if len(withItems.OrderItems) != 2 {
+			t.Fatalf("order %s has %d items, want 2", newOrderID, len(withItems.OrderItems))
+		}
+		gotItemIDs := map[string]bool{withItems.OrderItems[0].ID: true, withItems.OrderItems[1].ID: true}
+		if !gotItemIDs[newOrderItemID] || !gotItemIDs[newOrderItemID2] {
+			t.Fatalf("order %s items = %+v, want ids %s and %s", newOrderID, withItems.OrderItems, newOrderItemID, newOrderItemID2)
+		}
+
+		withoutItems, ok := byID[emptyOrderID]
+		if !ok {
+			t.Fatalf("GetOrders result missing order %s", emptyOrderID)
+		}
+		if len(withoutItems.OrderItems) != 0 {
+			t.Fatalf("order %s has %d items, want 0", emptyOrderID, len(withoutItems.OrderItems))
 		}
 	})
 
