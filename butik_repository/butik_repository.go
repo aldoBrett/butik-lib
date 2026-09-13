@@ -12,6 +12,7 @@ type Repositories struct {
 	Products           ProductsRepository
 	InventoryLocations InventoryLocationsRepository
 	Inventories        InventoriesRepository
+	InventoryMovements InventoryMovementsRepository
 }
 
 func NewRepositories(ctx context.Context, pool *pgxpool.Pool, user *butik_domain.User) *Repositories {
@@ -20,5 +21,6 @@ func NewRepositories(ctx context.Context, pool *pgxpool.Pool, user *butik_domain
 		Products:           NewProductsRepositoryHandler(ctx, pool, user),
 		InventoryLocations: NewInventoryLocationsRepositoryHandler(ctx, pool, user),
 		Inventories:        NewInventoriesRepositoryHandler(ctx, pool, user),
+		InventoryMovements: NewInventoryMovementsRepositoryHandler(ctx, pool, user),
 	}
 }
