@@ -65,7 +65,15 @@ type OrderItem struct {
 	UpdatedAt  time.Time `json:"updated_at"`
 }
 
+// OrderItemWithProduct extends OrderItem with its related product,
+// populated when callers ask GetOrderByID to include order items so a
+// detail view can display product names without extra lookups.
+type OrderItemWithProduct struct {
+	OrderItem
+	Product *Product `json:"product,omitempty"`
+}
+
 type OrderWithOrderItems struct {
-	Order      Order       `json:"order"`
-	OrderItems []OrderItem `json:"order_items"`
+	Order      Order                  `json:"order"`
+	OrderItems []OrderItemWithProduct `json:"order_items"`
 }

@@ -358,9 +358,19 @@ func TestOrdersRepository(t *testing.T) {
 		if len(got.OrderItems) != 2 {
 			t.Fatalf("GetOrderByID returned %d items, want 2", len(got.OrderItems))
 		}
-		gotItemIDs := map[string]bool{got.OrderItems[0].ID: true, got.OrderItems[1].ID: true}
-		if !gotItemIDs[newOrderItemID] || !gotItemIDs[newOrderItemID2] {
-			t.Fatalf("GetOrderByID items = %+v, want ids %s and %s", got.OrderItems, newOrderItemID, newOrderItemID2)
+		wantProductName := map[string]string{newOrderItemID: "Widget a", newOrderItemID2: "Widget b"}
+		for _, item := range got.OrderItems {
+			want, ok := wantProductName[item.ID]
+			if !ok {
+				t.Fatalf("GetOrderByID returned unexpected item %+v", item)
+			}
+			if item.Product == nil || item.Product.Name != want {
+				t.Fatalf("GetOrderByID item %s product = %+v, want name %q", item.ID, item.Product, want)
+			}
+			delete(wantProductName, item.ID)
+		}
+		if len(wantProductName) != 0 {
+			t.Fatalf("GetOrderByID items missing: %+v", wantProductName)
 		}
 	})
 

@@ -251,10 +251,14 @@ func (h *OrdersRepositoryHandler) getOrderByIDWithItems(id string) (*butik_domai
 	}
 
 	const itemsQuery = `
-		SELECT id, order_id, product_variant_id, location_id, quantity, unit_price, created_at, updated_at
-		FROM butiks_engine.order_items
-		WHERE order_id = $1
-		ORDER BY created_at ASC, id ASC
+		SELECT
+			oi.id, oi.order_id, oi.product_variant_id, oi.location_id, oi.quantity, oi.unit_price, oi.created_at, oi.updated_at,
+			p.id, p.name, p.slug, p.description, p.created_at, p.updated_at
+		FROM butiks_engine.order_items oi
+		JOIN butiks_engine.product_variants pv ON pv.id = oi.product_variant_id
+		JOIN butiks_engine.products p ON p.id = pv.product_id
+		WHERE oi.order_id = $1
+		ORDER BY oi.created_at ASC, oi.id ASC
 	`
 
 	rows, err := h.pool.Query(h.ctx, itemsQuery, id)
@@ -264,7 +268,10 @@ func (h *OrdersRepositoryHandler) getOrderByIDWithItems(id string) (*butik_domai
 	defer rows.Close()
 
 	for rows.Next() {
-		var it butik_domain.OrderItem
+		var (
+			it butik_domain.OrderItem
+			p  butik_domain.Product
+		)
 		if err := rows.Scan(
 			&it.ID,
 			&it.OrderID,
@@ -274,10 +281,16 @@ func (h *OrdersRepositoryHandler) getOrderByIDWithItems(id string) (*butik_domai
 			&it.UnitPrice,
 			&it.CreatedAt,
 			&it.UpdatedAt,
+			&p.ID,
+			&p.Name,
+			&p.Slug,
+			&p.Description,
+			&p.CreatedAt,
+			&p.UpdatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scanning order item: %w", err)
 		}
-		order.OrderItems = append(order.OrderItems, it)
+		order.OrderItems = append(order.OrderItems, butik_domain.OrderItemWithProduct{OrderItem: it, Product: &p})
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterating order items: %w", err)
