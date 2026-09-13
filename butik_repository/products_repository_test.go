@@ -269,6 +269,41 @@ func TestProductsRepository(t *testing.T) {
 		}
 	})
 
+	t.Run("GetProductByInventoryID resolves the product through the variant", func(t *testing.T) {
+		ctx, pool := newInventoriesTestPool(t)
+		repo := NewProductsRepositoryHandler(ctx, pool, nil)
+
+		now := time.Now().UTC()
+		productID := seedProduct(t, ctx, pool, "Widget", "widget", "a widget", now)
+		variantID := seedProductVariant(t, ctx, pool, productID, "widget-sku", 9.99, now)
+		locationID := seedInventoryLocation(t, ctx, pool, "Main", "main", "addr", true, now)
+		inventoryID := seedInventory(t, ctx, pool, variantID, locationID, 5, now)
+
+		got, err := repo.GetProductByInventoryID(inventoryID)
+		if err != nil {
+			t.Fatalf("GetProductByInventoryID: %v", err)
+		}
+		if got.ID != productID || got.Name != "Widget" || got.Slug != "widget" {
+			t.Fatalf("GetProductByInventoryID mapped incorrectly: %+v", got)
+		}
+	})
+
+	t.Run("GetProductByInventoryID returns pgx.ErrNoRows when the inventory id is unknown", func(t *testing.T) {
+		ctx, pool := newInventoriesTestPool(t)
+		repo := NewProductsRepositoryHandler(ctx, pool, nil)
+
+		got, err := repo.GetProductByInventoryID(missingInventoryID)
+		if err == nil {
+			t.Fatalf("GetProductByInventoryID(unknown) = %+v, want an error", got)
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			t.Fatalf("GetProductByInventoryID(unknown) error = %v, want pgx.ErrNoRows", err)
+		}
+		if got != nil {
+			t.Fatalf("GetProductByInventoryID(unknown) returned non-nil product %+v", got)
+		}
+	})
+
 	t.Run("DeleteProductByID removes only the target row", func(t *testing.T) {
 		ctx, pool := newTestPool(t)
 		repo := NewProductsRepositoryHandler(ctx, pool, nil)

@@ -23,6 +23,7 @@ type ProductsRepository interface {
 	GetProducts(params *GetProductsParams) ([]*butik_domain.Product, error)
 	CountProducts() (int, error)
 	GetProductByID(id string) (*butik_domain.Product, error)
+	GetProductByInventoryID(inventoryID string) (*butik_domain.Product, error)
 	DeleteProductByID(id string) error
 	SaveProduct(product *butik_domain.Product) error
 	SaveProductWithProductVariant(product *butik_domain.Product, variant *butik_domain.ProductVariant) error
@@ -97,6 +98,32 @@ func (h *ProductsRepositoryHandler) GetProductByID(id string) (*butik_domain.Pro
 		&p.UpdatedAt,
 	); err != nil {
 		return nil, fmt.Errorf("querying product by id: %w", err)
+	}
+
+	return &p, nil
+}
+
+// GetProductByInventoryID resolves the product that owns the product variant
+// referenced by an inventory row.
+func (h *ProductsRepositoryHandler) GetProductByInventoryID(inventoryID string) (*butik_domain.Product, error) {
+	const query = `
+		SELECT p.id, p.name, p.slug, p.description, p.created_at, p.updated_at
+		FROM butiks_engine.products p
+		JOIN butiks_engine.product_variants pv ON pv.product_id = p.id
+		JOIN butiks_engine.inventories i ON i.product_variant_id = pv.id
+		WHERE i.id = $1
+	`
+
+	var p butik_domain.Product
+	if err := h.pool.QueryRow(h.ctx, query, inventoryID).Scan(
+		&p.ID,
+		&p.Name,
+		&p.Slug,
+		&p.Description,
+		&p.CreatedAt,
+		&p.UpdatedAt,
+	); err != nil {
+		return nil, fmt.Errorf("querying product by inventory id: %w", err)
 	}
 
 	return &p, nil
