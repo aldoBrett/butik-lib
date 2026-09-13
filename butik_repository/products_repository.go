@@ -25,6 +25,7 @@ type ProductsRepository interface {
 	GetProductByID(id string) (*butik_domain.Product, error)
 	DeleteProductByID(id string) error
 	SaveProduct(product *butik_domain.Product) error
+	SaveProductWithProductVariant(product *butik_domain.Product, variant *butik_domain.ProductVariant) error
 }
 
 type ProductsRepositoryHandler struct {
@@ -152,6 +153,70 @@ func (h *ProductsRepositoryHandler) SaveProduct(product *butik_domain.Product) e
 	if err != nil {
 		return fmt.Errorf("saving product: %w", err)
 	}
+	return nil
+}
+
+// SaveProductWithProductVariant upserts the product and its variant in a
+// single transaction: if either save fails, both are rolled back.
+func (h *ProductsRepositoryHandler) SaveProductWithProductVariant(product *butik_domain.Product, variant *butik_domain.ProductVariant) error {
+	tx, err := h.pool.Begin(h.ctx)
+	if err != nil {
+		return fmt.Errorf("beginning transaction: %w", err)
+	}
+	defer tx.Rollback(h.ctx)
+
+	const productQuery = `
+		INSERT INTO butiks_engine.products (id, name, slug, description, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		ON CONFLICT (id) DO UPDATE SET
+			name = EXCLUDED.name,
+			slug = EXCLUDED.slug,
+			description = EXCLUDED.description,
+			created_at = EXCLUDED.created_at,
+			updated_at = EXCLUDED.updated_at
+	`
+	_, err = tx.Exec(
+		h.ctx,
+		productQuery,
+		product.ID,
+		product.Name,
+		product.Slug,
+		product.Description,
+		product.CreatedAt,
+		product.UpdatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("saving product: %w", err)
+	}
+
+	const variantQuery = `
+		INSERT INTO butiks_engine.product_variants (id, product_id, sku, price, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		ON CONFLICT (id) DO UPDATE
+		SET product_id = EXCLUDED.product_id,
+		    sku = EXCLUDED.sku,
+		    price = EXCLUDED.price,
+		    created_at = EXCLUDED.created_at,
+		    updated_at = EXCLUDED.updated_at
+	`
+	_, err = tx.Exec(
+		h.ctx,
+		variantQuery,
+		variant.ID,
+		variant.ProductID,
+		variant.SKU,
+		variant.Price,
+		variant.CreatedAt,
+		variant.UpdatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("saving product variant: %w", err)
+	}
+
+	if err := tx.Commit(h.ctx); err != nil {
+		return fmt.Errorf("committing transaction: %w", err)
+	}
+
 	return nil
 }
 

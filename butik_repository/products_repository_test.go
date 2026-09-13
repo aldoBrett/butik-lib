@@ -16,8 +16,9 @@ import (
 // A couple of syntactically valid UUIDs that gen_random_uuid() will never
 // produce collisions with in a freshly truncated table.
 const (
-	missingProductID = "00000000-0000-0000-0000-0000000000ff"
-	newProductID     = "11111111-1111-1111-1111-111111111111"
+	missingProductID    = "00000000-0000-0000-0000-0000000000ff"
+	newProductID        = "11111111-1111-1111-1111-111111111111"
+	newProductVariantID = "22222222-2222-2222-2222-222222222222"
 )
 
 // newTestPool connects to the database pointed at by DATABASE_URL and makes sure
@@ -383,6 +384,90 @@ func TestProductsRepository(t *testing.T) {
 		}
 		if count != 1 {
 			t.Fatalf("SaveProduct upsert created a second row: count = %d, want 1", count)
+		}
+	})
+
+	t.Run("SaveProductWithProductVariant saves both rows", func(t *testing.T) {
+		ctx, pool := newProductVariantsTestPool(t)
+		repo := NewProductsRepositoryHandler(ctx, pool, nil)
+
+		created := time.Now().UTC().Truncate(time.Second)
+		product := &butik_domain.Product{
+			ID:          newProductID,
+			Name:        "Hat",
+			Slug:        "hat",
+			Description: "a hat",
+			CreatedAt:   created,
+			UpdatedAt:   created,
+		}
+		variant := &butik_domain.ProductVariant{
+			ID:        newProductVariantID,
+			ProductID: newProductID,
+			SKU:       "HAT-1",
+			Price:     9.99,
+			CreatedAt: created,
+			UpdatedAt: created,
+		}
+
+		if err := repo.SaveProductWithProductVariant(product, variant); err != nil {
+			t.Fatalf("SaveProductWithProductVariant: %v", err)
+		}
+
+		gotProduct, err := repo.GetProductByID(newProductID)
+		if err != nil {
+			t.Fatalf("GetProductByID after save: %v", err)
+		}
+		if gotProduct.Name != "Hat" || gotProduct.Slug != "hat" {
+			t.Fatalf("SaveProductWithProductVariant stored the wrong product: %+v", gotProduct)
+		}
+
+		productID := newProductID
+		variantsRepo := NewProductVariantsRepositoryHandler(ctx, pool, nil)
+		gotVariants, err := variantsRepo.GetProductVariants(&GetProductVariantsParams{ProductID: &productID})
+		if err != nil {
+			t.Fatalf("GetProductVariants after save: %v", err)
+		}
+		if len(gotVariants) != 1 || gotVariants[0].ID != newProductVariantID || gotVariants[0].SKU != "HAT-1" {
+			t.Fatalf("SaveProductWithProductVariant stored the wrong variant: %+v", gotVariants)
+		}
+	})
+
+	t.Run("SaveProductWithProductVariant rolls back the product when the variant fails", func(t *testing.T) {
+		ctx, pool := newProductVariantsTestPool(t)
+		repo := NewProductsRepositoryHandler(ctx, pool, nil)
+
+		created := time.Now().UTC().Truncate(time.Second)
+		product := &butik_domain.Product{
+			ID:          newProductID,
+			Name:        "Hat",
+			Slug:        "hat",
+			Description: "a hat",
+			CreatedAt:   created,
+			UpdatedAt:   created,
+		}
+		variant := &butik_domain.ProductVariant{
+			ID:        newProductVariantID,
+			ProductID: missingProductID, // does not exist -> violates the FK constraint.
+			SKU:       "HAT-1",
+			Price:     9.99,
+			CreatedAt: created,
+			UpdatedAt: created,
+		}
+
+		if err := repo.SaveProductWithProductVariant(product, variant); err == nil {
+			t.Fatal("SaveProductWithProductVariant = nil, want error for invalid variant")
+		}
+
+		if _, err := repo.GetProductByID(newProductID); !errors.Is(err, pgx.ErrNoRows) {
+			t.Fatalf("after failed save, GetProductByID(newProductID) error = %v, want pgx.ErrNoRows", err)
+		}
+
+		count, err := repo.CountProducts()
+		if err != nil {
+			t.Fatalf("CountProducts: %v", err)
+		}
+		if count != 0 {
+			t.Fatalf("SaveProductWithProductVariant left a product behind after rollback: count = %d, want 0", count)
 		}
 	})
 }
