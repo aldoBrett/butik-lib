@@ -42,3 +42,25 @@ type InventoryMovement struct {
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 }
+
+type Order struct {
+	ID          string    `json:"id"`
+	TotalAmount float64   `json:"total_amount"`
+	TotalPrice  float64   `json:"total_price"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+type OrderItem struct {
+	ID               string    `json:"id"`
+	OrderID          string    `json:"order_id"`
+	ProductVariantID string    `json:"product_variant_id"`
+	// LocationID identifies which inventory location fulfills this line
+	// item, since a product variant can have separate inventory rows per
+	// location.
+	LocationID string    `json:"location_id"`
+	Quantity   int       `json:"quantity"`
+	UnitPrice  float64   `json:"unit_price"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
+}
