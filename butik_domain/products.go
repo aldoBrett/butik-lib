@@ -12,14 +12,14 @@ type Product struct {
 }
 
 type ProductVariant struct {
-	ID          string    `json:"id"`
-	ProductID   string    `json:"product_id"`
-	Name        string    `json:"name"`
-	Description *string   `json:"description,omitempty"`
-	SKU         string    `json:"sku"`
-	Price       float64   `json:"price"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID        string `json:"id"`
+	ProductID string `json:"product_id"`
+	// Name        string    `json:"name"`
+	// Description *string   `json:"description,omitempty"`
+	SKU       string    `json:"sku"`
+	Price     float64   `json:"price"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 type ProductLot struct {

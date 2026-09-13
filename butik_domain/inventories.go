@@ -13,12 +13,23 @@ type InventoryLocation struct {
 }
 
 type Inventory struct {
-	ID               string    `json:"id"`
-	ProductVariantID string    `json:"product_variant_id"`
-	LotID            string    `json:"lot_id"`
-	Quantity         int       `json:"quantity"`
-	CreatedAt        time.Time `json:"created_at"`
-	UpdatedAt        time.Time `json:"updated_at"`
+	ID               string `json:"id"`
+	ProductVariantID string `json:"product_variant_id"`
+	LocationID       string `json:"location_id"`
+	// ProductLotID is nil for inventory managed without lot tracking.
+	ProductLotID *string   `json:"product_lot_id,omitempty"`
+	Quantity     int       `json:"quantity"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+// InventoryWithDetails extends Inventory with its related product and
+// product variant, populated when callers ask GetInventories to include
+// them so an index view can display them without extra lookups.
+type InventoryWithDetails struct {
+	Inventory
+	Product        *Product        `json:"product,omitempty"`
+	ProductVariant *ProductVariant `json:"product_variant,omitempty"`
 }
 
 type InventoryMovement struct {
